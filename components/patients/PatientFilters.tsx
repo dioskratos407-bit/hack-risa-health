@@ -31,7 +31,7 @@ export const PatientFilters: React.FC<PatientFiltersProps> = ({
           type="text"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Buscar por nombre o ID..."
+          placeholder="Buscar por ID..."
           className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
         />
       </div>
@@ -49,9 +49,10 @@ export const PatientFilters: React.FC<PatientFiltersProps> = ({
             className="w-full sm:w-auto pl-9 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 appearance-none cursor-pointer"
           >
             <option value="Todos">Estado: Todos</option>
-            <option value="Monitoreo Activo">Monitoreo Activo</option>
-            <option value="Estable">Estable</option>
-            <option value="Alta">Alta</option>
+            <option value="DIAGNOSTICADO">Diagnosticado</option>
+            <option value="ANALIZANDO">Analizando (IA)</option>
+            <option value="CON_ALERTAS">Con Alertas</option>
+            <option value="SIN_ACTIVIDAD">Sin Actividad</option>
           </select>
         </div>
 
@@ -65,9 +66,9 @@ export const PatientFilters: React.FC<PatientFiltersProps> = ({
             onChange={(e) => onSortByChange(e.target.value)}
             className="w-full sm:w-auto pl-9 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 appearance-none cursor-pointer"
           >
-            <option value="lastEncounter">Ordenar: Última visita</option>
-            <option value="name">Ordenar: Nombre</option>
-            <option value="age">Ordenar: Edad</option>
+            <option value="estado">Ordenar: Estado</option>
+            <option value="diagnosticos">Ordenar: N.° de diagnósticos</option>
+            <option value="id">Ordenar: ID</option>
           </select>
         </div>
       </div>

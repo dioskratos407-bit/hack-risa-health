@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { getVariablesForCluster } from "@/lib/clinicalClusters";
+import { getVariablesForCluster, getAllVariables } from "@/lib/clinicalClusters";
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,7 +20,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const variablesDelCluster = getVariablesForCluster(cluster);
+    const variablesDelCluster =
+      cluster.toUpperCase() === "ALL" ? getAllVariables() : getVariablesForCluster(cluster);
     if (!variablesDelCluster || variablesDelCluster.length === 0) {
       return NextResponse.json(
         {
@@ -46,29 +47,44 @@ export async function GET(request: NextRequest) {
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-    // Consulta a Supabase con filtro de Viaje en el Tiempo (<= timeT)
-    const { data, error } = await supabase
-      .from("risa_master_data")
-      .select("timestamp, variable_code, value, device_id")
-      .eq("patient_id", patientId)
-      .in("variable_code", variablesDelCluster)
-      .lte("timestamp", timeT)
-      .order("timestamp", { ascending: true });
+    // Consulta a Supabase con filtro de Viaje en el Tiempo (<= timeT), paginada: sin
+    // esto, PostgREST trunca silenciosamente cada respuesta a su límite por defecto
+    // (1000 filas) -- con varios días de historial y varias variables (cluster=ALL),
+    // el conteo real supera eso fácilmente y el reloj mostraba datos "congelados" antes
+    // de timeT sin ningún error visible.
+    const PAGE_SIZE = 1000;
+    const allRows: any[] = [];
+    let from = 0;
 
-    if (error) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: error.message,
-        },
-        { status: 500 }
-      );
+    while (true) {
+      const { data: page, error } = await supabase
+        .from("risa_master_data")
+        .select("timestamp, variable_code, value, device_id")
+        .eq("patient_id", patientId)
+        .in("variable_code", variablesDelCluster)
+        .lte("timestamp", timeT)
+        .order("timestamp", { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: error.message,
+          },
+          { status: 500 }
+        );
+      }
+
+      allRows.push(...(page || []));
+      if (!page || page.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
     }
 
     return NextResponse.json({
       success: true,
       simulatedTime: timeT,
-      data: data || [],
+      data: allRows,
     });
   } catch (error: any) {
     return NextResponse.json(

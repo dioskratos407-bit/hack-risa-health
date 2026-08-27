@@ -1,43 +1,152 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { Suspense, useState, useMemo, useCallback, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { mockPatientsList } from '@/lib/mockPatients';
 import { PatientFilters } from '@/components/patients/PatientFilters';
 import { PatientDirectoryTable } from '@/components/patients/PatientDirectoryTable';
-import { Users, UserPlus } from 'lucide-react';
+import { useGlobalSimulation } from '@/components/simulation/GlobalSimulationContext';
+import {
+  PatientState,
+  PatientStateInfo,
+  PatientStateRaw,
+  PATIENT_STATE_LABELS,
+  PATIENT_STATE_RANK,
+  PATIENT_STATE_STYLES,
+  derivePatientState,
+} from '@/lib/patientStates';
+import { Users, RefreshCw, AlertCircle } from 'lucide-react';
 
-export default function PacientesPage() {
+const AUTO_REFRESH_MS = 15_000;
+
+const VALID_STATE_PARAMS = new Set<string>([
+  'DIAGNOSTICADO',
+  'ANALIZANDO',
+  'CON_ALERTAS',
+  'SIN_ACTIVIDAD',
+]);
+
+function PacientesContent() {
+  const searchParams = useSearchParams();
+  const estadoParam = searchParams.get('estado') || '';
+
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<string>('Todos');
-  const [sortBy, setSortBy] = useState<string>('lastEncounter');
+  const [statusFilter, setStatusFilter] = useState<string>(
+    VALID_STATE_PARAMS.has(estadoParam) ? estadoParam : 'Todos'
+  );
+  const [sortBy, setSortBy] = useState<string>('estado');
 
-  // Filter and sort logic
+  const [rawStates, setRawStates] = useState<Record<string, PatientStateRaw>>({});
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const { analyzingPatientIds, insightVersion, running } = useGlobalSimulation();
+
+  const fetchStates = useCallback(async (isBackground: boolean) => {
+    if (isBackground) setRefreshing(true);
+    try {
+      const res = await fetch('/api/patient-states');
+      const json = await res.json();
+      if (!json.success) {
+        setError(json.error || 'No se pudieron cargar los estados de los pacientes.');
+        return;
+      }
+      setError(null);
+      const map: Record<string, PatientStateRaw> = {};
+      (json.states as PatientStateRaw[]).forEach((s) => {
+        map[s.patientId] = s;
+      });
+      setRawStates(map);
+    } catch (err: any) {
+      setError(err.message || 'No se pudo conectar con el servidor.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStates(false);
+  }, [fetchStates]);
+
+  // Refresca cuando la simulación produce un diagnóstico nuevo, y en segundo plano
+  // mientras está corriendo (para reflejar alertas nuevas sin recargar).
+  useEffect(() => {
+    if (insightVersion > 0) fetchStates(true);
+  }, [insightVersion, fetchStates]);
+
+  useEffect(() => {
+    if (!running) return;
+    const interval = setInterval(() => fetchStates(true), AUTO_REFRESH_MS);
+    return () => clearInterval(interval);
+  }, [running, fetchStates]);
+
+  const analyzingSet = useMemo(() => new Set(analyzingPatientIds), [analyzingPatientIds]);
+
+  // Estado mostrado por paciente: lo persistido en la base, con "Analizando" superpuesto
+  // para los que tienen una llamada a la IA en vuelo en este instante.
+  const stateById = useMemo(() => {
+    const map: Record<string, PatientStateInfo> = {};
+    mockPatientsList.forEach((p) => {
+      const raw = rawStates[p.id];
+      map[p.id] = {
+        patientId: p.id,
+        state: derivePatientState(raw, analyzingSet.has(p.id)),
+        insightCount: raw?.insightCount ?? 0,
+        lastInsightAtISO: raw?.lastInsightAtISO ?? null,
+        alertCount: raw?.alertCount ?? 0,
+        topTier: raw?.topTier ?? null,
+      };
+    });
+    return map;
+  }, [rawStates, analyzingSet]);
+
+  const counts = useMemo(() => {
+    const c: Record<PatientState, number> = {
+      ANALIZANDO: 0,
+      DIAGNOSTICADO: 0,
+      CON_ALERTAS: 0,
+      SIN_ACTIVIDAD: 0,
+    };
+    Object.values(stateById).forEach((info) => {
+      c[info.state]++;
+    });
+    return c;
+  }, [stateById]);
+
   const filteredPatients = useMemo(() => {
     return mockPatientsList
       .filter((patient) => {
-        // Search by name or ID
         const query = searchQuery.toLowerCase().trim();
-        const matchesSearch =
-          patient.name.toLowerCase().includes(query) ||
-          patient.id.toLowerCase().includes(query);
+        const matchesSearch = patient.id.toLowerCase().includes(query);
 
-        // Filter by status
-        const matchesStatus =
-          statusFilter === 'Todos' || patient.status === statusFilter;
+        const state = stateById[patient.id]?.state ?? 'SIN_ACTIVIDAD';
+        const matchesStatus = statusFilter === 'Todos' || state === statusFilter;
 
         return matchesSearch && matchesStatus;
       })
       .sort((a, b) => {
-        if (sortBy === 'name') {
-          return a.name.localeCompare(b.name);
+        const infoA = stateById[a.id];
+        const infoB = stateById[b.id];
+
+        if (sortBy === 'estado') {
+          const rankDiff =
+            (PATIENT_STATE_RANK[infoB?.state ?? 'SIN_ACTIVIDAD'] ?? 0) -
+            (PATIENT_STATE_RANK[infoA?.state ?? 'SIN_ACTIVIDAD'] ?? 0);
+          if (rankDiff !== 0) return rankDiff;
+          return a.id.localeCompare(b.id);
         }
-        if (sortBy === 'age') {
-          return b.age - a.age; // descending age
+        if (sortBy === 'diagnosticos') {
+          const countDiff = (infoB?.insightCount ?? 0) - (infoA?.insightCount ?? 0);
+          if (countDiff !== 0) return countDiff;
+          return a.id.localeCompare(b.id);
         }
-        // default: lastEncounter ID reverse
         return a.id.localeCompare(b.id);
       });
-  }, [searchQuery, statusFilter, sortBy]);
+  }, [searchQuery, statusFilter, sortBy, stateById]);
+
+  const summaryStates: PatientState[] = ['DIAGNOSTICADO', 'ANALIZANDO', 'CON_ALERTAS', 'SIN_ACTIVIDAD'];
 
   return (
     <div className="space-y-6">
@@ -52,19 +161,58 @@ export default function PacientesPage() {
               Directorio de Pacientes
             </h1>
             <p className="text-xs text-slate-500 font-medium">
-              Gestión global de registros clínicos RISA
+              Estado de análisis y diagnósticos generados por el motor RISA
             </p>
           </div>
         </div>
 
         <button
-          onClick={() => alert('Abrir formulario para registrar nuevo paciente')}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs self-start sm:self-center"
+          onClick={() => fetchStates(true)}
+          disabled={refreshing}
+          className="flex items-center gap-2 text-xs text-slate-500 hover:text-blue-600 font-medium bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-200 px-3 py-2 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 self-start sm:self-center"
         >
-          <UserPlus className="w-4 h-4" />
-          <span>Registrar Paciente</span>
+          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+          <span>Actualizar estados</span>
         </button>
       </div>
+
+      {/* State Summary: click para filtrar */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {summaryStates.map((state) => {
+          const style = PATIENT_STATE_STYLES[state];
+          const isActive = statusFilter === state;
+          return (
+            <button
+              key={state}
+              onClick={() => setStatusFilter(isActive ? 'Todos' : state)}
+              className={`flex items-center justify-between gap-3 p-4 rounded-xl border bg-white text-left transition-all cursor-pointer ${
+                isActive
+                  ? 'border-blue-400 ring-2 ring-blue-500/20 shadow-xs'
+                  : 'border-slate-200 hover:border-slate-300 hover:shadow-xs'
+              }`}
+            >
+              <div>
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                  <span
+                    className={`w-2 h-2 rounded-full ${style.dot} ${
+                      style.pulse && counts[state] > 0 ? 'animate-pulse' : ''
+                    }`}
+                  />
+                  {PATIENT_STATE_LABELS[state]}
+                </span>
+                <span className="block text-2xl font-bold text-slate-800 mt-1">{counts[state]}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-2.5 bg-red-50 border border-red-200 text-red-700 text-sm font-medium px-4 py-3 rounded-xl">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
 
       {/* Search & Filters */}
       <PatientFilters
@@ -77,7 +225,19 @@ export default function PacientesPage() {
       />
 
       {/* Directory Table */}
-      <PatientDirectoryTable patients={filteredPatients} />
+      <PatientDirectoryTable
+        patients={filteredPatients}
+        stateById={stateById}
+        loading={loading}
+      />
     </div>
+  );
+}
+
+export default function PacientesPage() {
+  return (
+    <Suspense fallback={null}>
+      <PacientesContent />
+    </Suspense>
   );
 }

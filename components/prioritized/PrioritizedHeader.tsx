@@ -1,9 +1,9 @@
 'use client';
 
 import React from 'react';
-import { AlertCircle, Flame, Filter } from 'lucide-react';
+import { AlertCircle, Flame, AlertTriangle, Filter } from 'lucide-react';
 
-export type FilterOption = 'ALL' | 'CRITICAL' | 'CRITICAL_HIGH';
+export type FilterOption = 'ALL' | 'CRITICAL' | 'HIGH' | 'CRITICAL_HIGH';
 
 export interface PrioritizedHeaderProps {
   activeFilter: FilterOption;
@@ -67,6 +67,21 @@ export const PrioritizedHeader: React.FC<PrioritizedHeaderProps> = ({
         >
           <Flame className="w-3.5 h-3.5" />
           <span>Solo CRITICAL</span>
+        </button>
+
+        <button
+          onClick={() => onFilterChange('HIGH')}
+          className={`
+            px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150 cursor-pointer flex items-center gap-1.5
+            ${
+              activeFilter === 'HIGH'
+                ? 'bg-orange-600 text-white shadow-xs'
+                : 'text-orange-700 hover:bg-orange-50'
+            }
+          `}
+        >
+          <AlertTriangle className="w-3.5 h-3.5" />
+          <span>Solo HIGH</span>
         </button>
 
         <button

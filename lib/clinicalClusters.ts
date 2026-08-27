@@ -28,3 +28,11 @@ export function getVariablesForCluster(clusterKey: string): string[] {
   const cluster = CLINICAL_CLUSTERS[normalizedKey];
   return cluster ? cluster.variables : [];
 }
+
+export function getAllVariables(): string[] {
+  const all = new Set<string>();
+  Object.values(CLINICAL_CLUSTERS).forEach((cluster) => {
+    cluster.variables.forEach((v) => all.add(v));
+  });
+  return Array.from(all);
+}

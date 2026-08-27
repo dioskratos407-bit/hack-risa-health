@@ -4,7 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { PrioritizedPatient } from '@/lib/mockPrioritized';
 import PriorityBadge from '@/components/ui/PriorityBadge';
-import { AlertTriangle, Clock, ArrowRight, User } from 'lucide-react';
+import { AlertTriangle, Clock, ArrowRight, BrainCircuit } from 'lucide-react';
 
 export interface AlertGridProps {
   patients: PrioritizedPatient[];
@@ -51,17 +51,21 @@ export const AlertGrid: React.FC<AlertGridProps> = ({ patients }) => {
                 {/* Header: Patient Name, ID & Priority Badge */}
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h3 className="font-bold text-slate-900 text-base leading-tight">
-                      {patient.patientName}
+                    <h3 className="font-bold text-slate-900 text-base leading-tight font-mono">
+                      {patient.id}
                     </h3>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="font-mono text-xs font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200">
-                        {patient.id}
-                      </span>
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
                       <span className="flex items-center gap-1 text-xs text-slate-400">
                         <Clock className="w-3 h-3" />
                         {patient.timestamp}
                       </span>
+                      {patient.hasDiagnosis && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded-md">
+                          <BrainCircuit className="w-3 h-3" />
+                          {patient.insightCount}{' '}
+                          {patient.insightCount === 1 ? 'diagnóstico' : 'diagnósticos'}
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -92,10 +96,19 @@ export const AlertGrid: React.FC<AlertGridProps> = ({ patients }) => {
 
                 {/* Reason Box */}
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200/70 flex items-start gap-2.5">
-                  <AlertTriangle className="w-4 h-4 text-orange-600 shrink-0 mt-0.5" />
-                  <p className="text-xs text-slate-700 font-medium leading-relaxed">
-                    {patient.alertReason}
-                  </p>
+                  {patient.source === 'DIAGNOSIS' ? (
+                    <BrainCircuit className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-orange-600 shrink-0 mt-0.5" />
+                  )}
+                  <div>
+                    <span className="block text-[10px] uppercase font-bold tracking-wider text-slate-400 mb-0.5">
+                      {patient.source === 'DIAGNOSIS' ? 'Análisis contextual de IA' : 'Motor de reglas'}
+                    </span>
+                    <p className="text-xs text-slate-700 font-medium leading-relaxed">
+                      {patient.alertReason}
+                    </p>
+                  </div>
                 </div>
               </div>
 

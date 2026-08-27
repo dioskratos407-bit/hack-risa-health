@@ -13,14 +13,6 @@ export interface PatientHeaderProps {
 export const PatientHeader: React.FC<PatientHeaderProps> = ({ patient }) => {
   const router = useRouter();
 
-  const getInitials = (name: string) => {
-    const parts = name.replace(/Dra?\.\s*/g, '').trim().split(' ');
-    if (parts.length >= 2) {
-      return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-    }
-    return parts[0].substring(0, 2).toUpperCase();
-  };
-
   const handlePatientSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedId = e.target.value;
     if (selectedId) {
@@ -31,28 +23,20 @@ export const PatientHeader: React.FC<PatientHeaderProps> = ({ patient }) => {
   return (
     <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-200">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        {/* Left Side: Avatar, Name, ID, Age, Gender */}
+        {/* Left Side: Avatar, ID, Age, Gender */}
         <div className="flex items-center gap-4">
-          <div className="w-16 h-16 rounded-full bg-blue-100 text-blue-700 font-bold text-xl flex items-center justify-center border-2 border-blue-200 shadow-xs shrink-0">
-            {getInitials(patient.name)}
+          <div className="w-16 h-16 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center border-2 border-blue-200 shadow-xs shrink-0">
+            <User className="w-7 h-7" />
           </div>
 
           <div className="space-y-1">
             <div className="flex items-center gap-3">
-              <h1 className="text-xl md:text-2xl font-extrabold text-slate-900 tracking-tight">
-                {patient.name}
-              </h1>
-              <span className="font-mono text-xs font-semibold bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md border border-slate-200">
+              <h1 className="text-xl md:text-2xl font-extrabold text-slate-900 tracking-tight font-mono">
                 {patient.id}
-              </span>
+              </h1>
             </div>
 
             <div className="flex items-center gap-3 text-xs text-slate-500 font-medium">
-              <span className="flex items-center gap-1.5 text-slate-700 font-medium">
-                <User className="w-3.5 h-3.5 text-slate-400" />
-                {patient.age} años • {patient.gender}
-              </span>
-              <span>•</span>
               <span className="flex items-center gap-1.5 text-slate-500">
                 <Calendar className="w-3.5 h-3.5 text-slate-400" />
                 Última atención: {patient.lastEncounter}
@@ -73,7 +57,7 @@ export const PatientHeader: React.FC<PatientHeaderProps> = ({ patient }) => {
             >
               {mockPatientsList.slice(0, 100).map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.id} - {p.name}
+                  {p.id}
                 </option>
               ))}
             </select>

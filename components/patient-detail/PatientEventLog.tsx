@@ -1,62 +1,49 @@
 'use client';
 
-import React from 'react';
-import { mockPatientEvents, PatientEvent, EventType } from '@/lib/mockPatientDetails';
-import { Clock, ShieldAlert, FileSpreadsheet, LogIn, Syringe } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Clock, Monitor, Watch, HelpCircle, RadioTower, ChevronLeft, ChevronRight } from 'lucide-react';
+import { TimelineRecord, VARIABLE_UNITS } from '@/components/patient-detail/useSimulatedClock';
 
 export interface PatientEventLogProps {
-  events?: PatientEvent[];
+  records: TimelineRecord[];
+  currentTimeISO: string;
+  loading?: boolean;
 }
 
-export const PatientEventLog: React.FC<PatientEventLogProps> = ({
-  events = mockPatientEvents,
-}) => {
-  const getBadgeStyle = (type: EventType) => {
-    switch (type) {
-      case 'INGRESO':
-        return 'bg-blue-100 text-blue-700 border-blue-200';
-      case 'EXAMEN':
-        return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-      case 'TRATAMIENTO':
-        return 'bg-purple-100 text-purple-700 border-purple-200';
-      case 'ALERTA':
-        return 'bg-red-100 text-red-700 border-red-200';
-      default:
-        return 'bg-slate-100 text-slate-700 border-slate-200';
-    }
-  };
+const PAGE_SIZE = 25;
 
-  const getEventIcon = (type: EventType) => {
-    switch (type) {
-      case 'INGRESO':
-        return <LogIn className="w-4 h-4 text-blue-600" />;
-      case 'EXAMEN':
-        return <FileSpreadsheet className="w-4 h-4 text-emerald-600" />;
-      case 'TRATAMIENTO':
-        return <Syringe className="w-4 h-4 text-purple-600" />;
-      case 'ALERTA':
-        return <ShieldAlert className="w-4 h-4 text-red-600" />;
-      default:
-        return <Clock className="w-4 h-4 text-slate-400" />;
-    }
-  };
+function getSourceInfo(deviceId?: string | null) {
+  if (!deviceId) {
+    return { label: 'Origen no especificado', icon: HelpCircle, style: 'bg-slate-100 text-slate-600 border-slate-200' };
+  }
+  if (deviceId.startsWith('DEV-')) {
+    return { label: 'Monitor Clínico', icon: Monitor, style: 'bg-blue-50 text-blue-700 border-blue-200' };
+  }
+  if (deviceId.startsWith('WRB-')) {
+    return { label: 'Wearable Domiciliario', icon: Watch, style: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+  }
+  return { label: 'Otro Dispositivo', icon: RadioTower, style: 'bg-purple-50 text-purple-700 border-purple-200' };
+}
 
-  // Helper to format ISO timestamp into clean local Spanish representation
-  const formatTimestamp = (isoString: string) => {
-    try {
-      const d = new Date(isoString);
-      if (isNaN(d.getTime())) return isoString;
-      const day = d.getUTCDate().toString().padStart(2, '0');
-      const monthNames = ['Ago', 'Ago', 'Ago', 'Ago', 'Ago', 'Ago', 'Ago', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-      const month = 'Ago'; // 2026-08
-      const year = d.getUTCFullYear();
-      const hours = d.getUTCHours().toString().padStart(2, '0');
-      const minutes = d.getUTCMinutes().toString().padStart(2, '0');
-      return `${day} ${month} ${year} - ${hours}:${minutes}`;
-    } catch {
-      return isoString;
-    }
-  };
+const formatTimestamp = (isoString: string) => isoString.replace('T', ' ').replace('Z', '');
+
+export const PatientEventLog: React.FC<PatientEventLogProps> = ({ records, currentTimeISO, loading }) => {
+  const [page, setPage] = useState(1);
+
+  // Más reciente primero -- los registros llegan de la API en orden cronológico ascendente.
+  const reversed = useMemo(() => [...records].reverse(), [records]);
+
+  const totalPages = Math.max(1, Math.ceil(reversed.length / PAGE_SIZE));
+
+  // Si el set se reduce (cambio de paciente, reset del reloj) y la página actual queda
+  // fuera de rango, se reajusta -- pero no se vuelve a la página 1 cuando llegan
+  // registros nuevos, para no interrumpir la lectura del historial antiguo.
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const startIdx = (page - 1) * PAGE_SIZE;
+  const visible = reversed.slice(startIdx, startIdx + PAGE_SIZE);
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-6">
@@ -68,63 +55,103 @@ export const PatientEventLog: React.FC<PatientEventLogProps> = ({
           </div>
           <div>
             <h2 className="text-lg font-bold text-slate-800 tracking-tight">
-              Registro Cronológico de Eventos Clínicos
+              Registro Cronológico de Ingesta
             </h2>
             <p className="text-xs text-slate-500 font-medium">
-              Línea de tiempo auditada de ingresos, exámenes, tratamientos y alertas
+              Cómo se van revelando los registros en el sistema a medida que avanza el reloj simulado
+              (t ≤ {formatTimestamp(currentTimeISO)})
             </p>
           </div>
         </div>
 
         <span className="text-xs font-semibold bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200 self-start sm:self-center">
-          {events.length} Eventos Registrados
+          {records.length.toLocaleString('es')} Registros hasta t_sim
         </span>
       </div>
 
-      {/* Vertical Timeline Container */}
-      <div className="relative pl-6 sm:pl-8 space-y-8 before:absolute before:left-3 sm:before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-        {events.map((event) => (
-          <div key={event.id} className="relative group">
-            {/* Connector Node / Circle */}
-            <div className="absolute -left-6 sm:-left-8 top-1 w-6 h-6 rounded-full bg-white border-2 border-slate-300 flex items-center justify-center group-hover:border-blue-600 transition-colors shadow-2xs">
-              <span className="w-2 h-2 rounded-full bg-slate-600 group-hover:bg-blue-600 transition-colors" />
-            </div>
+      {loading && records.length === 0 ? (
+        <div className="text-center text-slate-400 text-sm py-10">Cargando registros...</div>
+      ) : records.length === 0 ? (
+        <div className="text-center text-slate-400 text-sm py-10">
+          Sin registros revelados todavía para este instante simulado.
+        </div>
+      ) : (
+        <div className="rounded-lg border border-slate-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-slate-50">
+                <tr className="text-slate-500 uppercase text-xs font-semibold tracking-wider border-b border-slate-200">
+                  <th scope="col" className="py-3 px-4">Hora de Registro</th>
+                  <th scope="col" className="py-3 px-4">Variable</th>
+                  <th scope="col" className="py-3 px-4">Valor</th>
+                  <th scope="col" className="py-3 px-4">Origen del Registro</th>
+                  <th scope="col" className="py-3 px-4">Dispositivo</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {visible.map((record, idx) => {
+                  const source = getSourceInfo(record.device_id);
+                  const SourceIcon = source.icon;
+                  return (
+                    <tr key={`${record.variable_code}-${record.timestamp}-${startIdx + idx}`} className="bg-white hover:bg-slate-50/80 transition-colors">
+                      <td className="py-2.5 px-4 font-mono text-xs text-slate-600 whitespace-nowrap">
+                        {formatTimestamp(record.timestamp)}
+                      </td>
+                      <td className="py-2.5 px-4 font-bold text-slate-800 text-xs">{record.variable_code}</td>
+                      <td className="py-2.5 px-4 font-mono text-xs text-slate-700">
+                        {record.value} <span className="text-slate-400">{VARIABLE_UNITS[record.variable_code] || ''}</span>
+                      </td>
+                      <td className="py-2.5 px-4">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border ${source.style}`}>
+                          <SourceIcon className="w-3 h-3" />
+                          {source.label}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-4 font-mono text-xs text-slate-500">{record.device_id || '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
 
-            {/* Event Item Card */}
-            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-4 space-y-2 hover:bg-slate-100/50 hover:border-slate-300 transition-colors">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold border ${getBadgeStyle(
-                      event.type
-                    )}`}
-                  >
-                    {getEventIcon(event.type)}
-                    <span>{event.type}</span>
-                  </span>
-                  <h3 className="font-bold text-slate-900 text-sm sm:text-base">
-                    {event.title}
-                  </h3>
-                </div>
-
-                <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
-                  <Clock className="w-3.5 h-3.5 text-slate-400" />
-                  <span>{formatTimestamp(event.timestamp)}</span>
-                </div>
-              </div>
-
-              <p className="text-slate-600 text-xs sm:text-sm leading-relaxed font-normal">
-                {event.description}
-              </p>
-
-              <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-xs text-slate-400">
-                <span>ID de Registro: <strong className="text-slate-700 font-mono">{event.id}</strong></span>
-                <span className="text-[11px] text-slate-400 font-mono">ISO: {event.timestamp}</span>
-              </div>
+          {/* Pagination Controls */}
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-slate-200 bg-slate-50/50">
+            <span className="text-xs text-slate-500 font-medium">
+              Mostrando {startIdx + 1}-{Math.min(startIdx + PAGE_SIZE, reversed.length)} de{' '}
+              {reversed.length.toLocaleString('es')}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setPage(1)}
+                disabled={page <= 1}
+                className="px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Más recientes
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                aria-label="Página anterior"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="text-xs font-semibold text-slate-600 px-2 whitespace-nowrap">
+                Página {page} de {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                aria-label="Página siguiente"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
             </div>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

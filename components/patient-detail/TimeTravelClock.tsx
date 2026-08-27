@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Clock,
   Play,
@@ -11,105 +11,45 @@ import {
   ShieldAlert,
   AlertTriangle,
   RefreshCw,
-  TrendingUp,
 } from 'lucide-react';
 import { CLINICAL_CLUSTERS } from '@/lib/clinicalClusters';
 import { FinancialClinicalChart } from '@/components/patient-detail/FinancialClinicalChart';
+import { AlertsPanel } from '@/components/patient-detail/AlertsPanel';
+import { UseSimulatedClockResult, VARIABLE_UNITS } from '@/components/patient-detail/useSimulatedClock';
+import { useGlobalSimulation } from '@/components/simulation/GlobalSimulationContext';
+
+function formatTimeLabel(epoch: number): string {
+  return new Date(epoch).toISOString().split('.')[0].replace('T', ' ');
+}
 
 interface TimeTravelClockProps {
-  patientId?: string;
+  clock: UseSimulatedClockResult;
 }
 
-interface TimelineRecord {
-  timestamp: string;
-  variable_code: string;
-  value: string | number;
-}
+export const TimeTravelClock: React.FC<TimeTravelClockProps> = ({ clock }) => {
+  const {
+    minEpoch,
+    maxEpoch,
+    windowLoading,
+    currentEpoch,
+    setCurrentEpoch,
+    currentTimeISO,
+    isPlaying,
+    setIsPlaying,
+    playbackSpeed,
+    setPlaybackSpeed,
+    data,
+    loading,
+    error,
+    fetchData,
+    handleReset,
+    alerts,
+  } = clock;
 
-export const TimeTravelClock: React.FC<TimeTravelClockProps> = ({
-  patientId = 'PAT-0001',
-}) => {
-  // Timeline range boundaries (ISO UTC) - Basado en los datos reales del Paciente 1 (PAT-0001)
-  const MIN_TIME = '2026-07-10T09:00:00Z';
-  const MAX_TIME = '2026-07-19T09:00:00Z';
+  const { running: systemRunning } = useGlobalSimulation();
 
-  const minEpoch = new Date(MIN_TIME).getTime();
-  const maxEpoch = new Date(MAX_TIME).getTime();
-
-  // State
   const [selectedCluster, setSelectedCluster] = useState<string>('HEMODINAMICO');
   const [selectedVariable, setSelectedVariable] = useState<string>('HR');
-  const [currentEpoch, setCurrentEpoch] = useState<number>(
-    new Date('2026-07-10T12:00:00Z').getTime()
-  );
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1); // minutes step per interval
-
-  const [data, setData] = useState<TimelineRecord[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-
-  const currentTimeISO = new Date(currentEpoch).toISOString().split('.')[0] + 'Z';
-
-  // Fetch API data when patientId, cluster or currentTimeISO changes
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const url = `/api/patient-timeline?patientId=${encodeURIComponent(
-        patientId
-      )}&timeT=${encodeURIComponent(currentTimeISO)}&cluster=${encodeURIComponent(
-        selectedCluster
-      )}`;
-
-      const res = await fetch(url);
-      const json = await res.json();
-
-      if (!res.ok || !json.success) {
-        setError(json.error || 'Error al obtener la línea de tiempo');
-        setData([]);
-      } else {
-        setData(json.data || []);
-      }
-    } catch (err: any) {
-      setError(err.message || 'Error de conexión con el servidor');
-    } finally {
-      setLoading(false);
-    }
-  }, [patientId, currentTimeISO, selectedCluster]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  // Simulation Playback Timer
-  useEffect(() => {
-    if (isPlaying) {
-      timerRef.current = setInterval(() => {
-        setCurrentEpoch((prev) => {
-          const next = prev + playbackSpeed * 60 * 1000;
-          if (next >= maxEpoch) {
-            setIsPlaying(false);
-            return maxEpoch;
-          }
-          return next;
-        });
-      }, 1000);
-    } else if (timerRef.current) {
-      clearInterval(timerRef.current);
-    }
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [isPlaying, playbackSpeed, maxEpoch]);
-
-  const handleReset = () => {
-    setIsPlaying(false);
-    setCurrentEpoch(minEpoch);
-  };
 
   const activeClusterObj = CLINICAL_CLUSTERS[selectedCluster] || CLINICAL_CLUSTERS['HEMODINAMICO'];
 
@@ -149,23 +89,12 @@ export const TimeTravelClock: React.FC<TimeTravelClockProps> = ({
     ACTIVITY_LEVEL: '#6366f1',
   };
 
-  const variableUnits: Record<string, string> = {
-    HR: 'bpm',
-    SYS_BP: 'mmHg',
-    DIA_BP: 'mmHg',
-    RESP: 'rpm',
-    SpO2: '%',
-    TEMP: '°C',
-    STEPS: 'pasos',
-    ACTIVITY_LEVEL: '',
-  };
-
   return (
     <div className="bg-white rounded-xl shadow-md border border-slate-200 p-6 space-y-6">
       {/* Time Travel Banner Header */}
       <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white rounded-xl p-5 shadow-lg relative overflow-hidden">
         <div className="absolute right-0 top-0 translate-x-8 -translate-y-8 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
-        
+
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 relative z-10">
           <div className="flex items-center gap-3">
             <div className="p-3 bg-blue-500/20 border border-blue-400/30 rounded-xl backdrop-blur-md text-blue-400">
@@ -224,29 +153,36 @@ export const TimeTravelClock: React.FC<TimeTravelClockProps> = ({
 
         {/* Playback Controls & Speed */}
         <div className="lg:col-span-4 flex items-end gap-2">
-          <button
-            onClick={() => setIsPlaying(!isPlaying)}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-bold text-sm transition-all shadow-xs cursor-pointer ${
-              isPlaying
-                ? 'bg-amber-500 hover:bg-amber-600 text-white'
-                : 'bg-blue-600 hover:bg-blue-700 text-white'
-            }`}
-          >
-            {isPlaying ? (
-              <>
-                <Pause className="w-4 h-4" /> Pausar Simulación
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4" /> Iniciar Reproducción
-              </>
-            )}
-          </button>
+          {systemRunning ? (
+            <div className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-bold text-sm bg-emerald-50 border border-emerald-200 text-emerald-700">
+              <Activity className="w-4 h-4 animate-pulse" /> Sincronizado con Simulación del Sistema
+            </div>
+          ) : (
+            <button
+              onClick={() => setIsPlaying(!isPlaying)}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-bold text-sm transition-all shadow-xs cursor-pointer ${
+                isPlaying
+                  ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+              }`}
+            >
+              {isPlaying ? (
+                <>
+                  <Pause className="w-4 h-4" /> Pausar Simulación
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4" /> Iniciar Reproducción
+                </>
+              )}
+            </button>
+          )}
 
           <button
             onClick={handleReset}
+            disabled={systemRunning}
             title="Reiniciar a inicio"
-            className="p-2.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-lg shadow-xs cursor-pointer"
+            className="p-2.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-lg shadow-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
@@ -254,7 +190,8 @@ export const TimeTravelClock: React.FC<TimeTravelClockProps> = ({
           <select
             value={playbackSpeed}
             onChange={(e) => setPlaybackSpeed(Number(e.target.value))}
-            className="bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-bold text-slate-700 shadow-xs outline-none"
+            disabled={systemRunning}
+            className="bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-bold text-slate-700 shadow-xs outline-none disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <option value={1}>1x (1m/s)</option>
             <option value={5}>5x (5m/s)</option>
@@ -278,9 +215,11 @@ export const TimeTravelClock: React.FC<TimeTravelClockProps> = ({
         {/* Interactive Timeline Range Slider */}
         <div className="lg:col-span-12 space-y-1 pt-2">
           <div className="flex justify-between text-xs font-medium text-slate-500">
-            <span>Inicio: {MIN_TIME.replace('T', ' ').replace('Z', '')}</span>
-            <span className="font-bold text-blue-600">{currentTimeISO.replace('T', ' ').replace('Z', '')}</span>
-            <span>Fin: {MAX_TIME.replace('T', ' ').replace('Z', '')}</span>
+            <span>Inicio: {windowLoading ? '...' : formatTimeLabel(minEpoch)}</span>
+            <span className="font-bold text-blue-600">
+              {windowLoading ? 'Resolviendo ventana de datos...' : currentTimeISO.replace('T', ' ').replace('Z', '')}
+            </span>
+            <span>Fin: {windowLoading ? '...' : formatTimeLabel(maxEpoch)}</span>
           </div>
           <input
             type="range"
@@ -288,11 +227,12 @@ export const TimeTravelClock: React.FC<TimeTravelClockProps> = ({
             max={maxEpoch}
             step={15 * 60 * 1000} // 15 min steps
             value={currentEpoch}
+            disabled={windowLoading || systemRunning}
             onChange={(e) => {
               setIsPlaying(false);
               setCurrentEpoch(Number(e.target.value));
             }}
-            className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
           />
         </div>
       </div>
@@ -327,7 +267,7 @@ export const TimeTravelClock: React.FC<TimeTravelClockProps> = ({
                   {hasVal ? metric.value : '--'}
                 </span>
                 <span className={`text-xs ${isSelected ? 'text-slate-400' : 'text-slate-500'}`}>
-                  {variableUnits[varCode] || ''}
+                  {VARIABLE_UNITS[varCode] || ''}
                 </span>
               </div>
               <div className={`mt-1 text-[11px] font-mono truncate ${isSelected ? 'text-slate-400' : 'text-slate-400'}`}>
@@ -351,10 +291,13 @@ export const TimeTravelClock: React.FC<TimeTravelClockProps> = ({
         rawData={variableData}
         timeTISO={currentTimeISO}
         variableName={selectedVariable}
-        variableUnit={variableUnits[selectedVariable] || ''}
+        variableUnit={VARIABLE_UNITS[selectedVariable] || ''}
         lineColor={lineColors[selectedVariable] || '#f43f5e'}
         title="Tendencia"
       />
+
+      {/* Panel de Alertas Priorizadas (motor de reglas + patrones de gestión de falsas alarmas) */}
+      <AlertsPanel alerts={alerts} />
     </div>
   );
 };
