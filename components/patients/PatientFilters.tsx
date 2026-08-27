@@ -2,6 +2,13 @@
 
 import React from 'react';
 import { Search, Filter, ArrowUpDown } from 'lucide-react';
+import {
+  AGE_GROUP_OPTIONS,
+  REGION_TYPE_OPTIONS,
+  CARE_PROGRAM_OPTIONS,
+  REGION_TYPE_LABELS,
+  CARE_PROGRAM_LABELS,
+} from '@/lib/patientDemographics';
 
 export interface PatientFiltersProps {
   searchQuery: string;
@@ -10,6 +17,12 @@ export interface PatientFiltersProps {
   onStatusFilterChange: (value: string) => void;
   sortBy: string;
   onSortByChange: (value: string) => void;
+  regionFilter: string;
+  onRegionFilterChange: (value: string) => void;
+  programFilter: string;
+  onProgramFilterChange: (value: string) => void;
+  ageGroupFilter: string;
+  onAgeGroupFilterChange: (value: string) => void;
 }
 
 export const PatientFilters: React.FC<PatientFiltersProps> = ({
@@ -19,6 +32,12 @@ export const PatientFilters: React.FC<PatientFiltersProps> = ({
   onStatusFilterChange,
   sortBy,
   onSortByChange,
+  regionFilter,
+  onRegionFilterChange,
+  programFilter,
+  onProgramFilterChange,
+  ageGroupFilter,
+  onAgeGroupFilterChange,
 }) => {
   return (
     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6 flex flex-col md:flex-row gap-4 justify-between items-center">
@@ -53,6 +72,54 @@ export const PatientFilters: React.FC<PatientFiltersProps> = ({
             <option value="ANALIZANDO">Analizando (IA)</option>
             <option value="CON_ALERTAS">Con Alertas</option>
             <option value="SIN_ACTIVIDAD">Sin Actividad</option>
+          </select>
+        </div>
+
+        {/* Filter by Region */}
+        <div className="relative w-full sm:w-auto flex items-center">
+          <select
+            value={regionFilter}
+            onChange={(e) => onRegionFilterChange(e.target.value)}
+            className="w-full sm:w-auto px-3 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 appearance-none cursor-pointer"
+          >
+            <option value="Todos">Región: Todas</option>
+            {REGION_TYPE_OPTIONS.map((region) => (
+              <option key={region} value={region}>
+                {REGION_TYPE_LABELS[region] ?? region}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Filter by Care Program */}
+        <div className="relative w-full sm:w-auto flex items-center">
+          <select
+            value={programFilter}
+            onChange={(e) => onProgramFilterChange(e.target.value)}
+            className="w-full sm:w-auto px-3 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 appearance-none cursor-pointer"
+          >
+            <option value="Todos">Programa: Todos</option>
+            {CARE_PROGRAM_OPTIONS.map((program) => (
+              <option key={program} value={program}>
+                {CARE_PROGRAM_LABELS[program] ?? program}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Filter by Age Group */}
+        <div className="relative w-full sm:w-auto flex items-center">
+          <select
+            value={ageGroupFilter}
+            onChange={(e) => onAgeGroupFilterChange(e.target.value)}
+            className="w-full sm:w-auto px-3 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 appearance-none cursor-pointer"
+          >
+            <option value="Todos">Edad: Todas</option>
+            {AGE_GROUP_OPTIONS.map((group) => (
+              <option key={group} value={group}>
+                {group} años
+              </option>
+            ))}
           </select>
         </div>
 

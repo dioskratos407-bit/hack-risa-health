@@ -7,10 +7,11 @@ import { PatientHeader } from '@/components/patient-detail/PatientHeader';
 import { AIClinicalInsights, InsightStatus } from '@/components/patient-detail/AIClinicalInsights';
 import { AIInsightsData } from '@/lib/mockAIInsights';
 import { PatientEventLog } from '@/components/patient-detail/PatientEventLog';
+import { PatientClinicalHistory } from '@/components/patient-detail/PatientClinicalHistory';
 import { TimeTravelClock } from '@/components/patient-detail/TimeTravelClock';
 import { useSimulatedClock } from '@/components/patient-detail/useSimulatedClock';
 import { useGlobalSimulation } from '@/components/simulation/GlobalSimulationContext';
-import { Clock, History } from 'lucide-react';
+import { Clock, History, FileHeart } from 'lucide-react';
 
 function mapInsightRow(row: any): AIInsightsData {
   return {
@@ -31,8 +32,8 @@ export default function PatientDetailPage() {
   const rawId = typeof params?.id === 'string' ? params.id : 'PAT-0001';
   const patient = getPatientDetailById(rawId);
 
-  // Active tab state: 'eventos' | 'reloj'
-  const [activeTab, setActiveTab] = useState<'reloj' | 'eventos'>('reloj');
+  // Active tab state: 'eventos' | 'reloj' | 'clinico'
+  const [activeTab, setActiveTab] = useState<'reloj' | 'eventos' | 'clinico'>('reloj');
 
   // Hallazgos Destacados: se hidrata desde el último análisis contextual persistido
   // (generado por Gemini cuando el motor de priorización detecta algo HIGH/CRITICAL).
@@ -100,6 +101,11 @@ export default function PatientDetailPage() {
       label: 'Log de Eventos',
       icon: Clock,
     },
+    {
+      id: 'clinico',
+      label: 'Historial Clínico',
+      icon: FileHeart,
+    },
   ] as const;
 
   return (
@@ -146,6 +152,9 @@ export default function PatientDetailPage() {
         {activeTab === 'reloj' && <TimeTravelClock clock={clock} />}
         {activeTab === 'eventos' && (
           <PatientEventLog records={clock.data} currentTimeISO={clock.currentTimeISO} loading={clock.loading} />
+        )}
+        {activeTab === 'clinico' && clock.currentTimeISO && (
+          <PatientClinicalHistory patientId={rawId} currentTimeISO={clock.currentTimeISO} />
         )}
       </section>
     </div>

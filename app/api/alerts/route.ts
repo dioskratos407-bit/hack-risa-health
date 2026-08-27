@@ -1,30 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getReadClient, getWriteClient } from "@/lib/supabaseClient";
+import {
+  validatePatientId,
+  validateTimestamp,
+  validateVariableCode,
+  validatePriorityTier,
+  validateAlertKind,
+  validateScore,
+  validateMeasurement,
+  sanitizeFreeText,
+  ValidationError,
+} from "@/lib/validation";
+import { checkRateLimit, getClientKey } from "@/lib/rateLimit";
 
-function getSupabaseClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error(
-      "Supabase credentials are missing from environment variables (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)."
-    );
-  }
-  return createClient(supabaseUrl, supabaseAnonKey);
-}
+// Escribe en la base, así que se acota para que no sirva como vector de inundación.
+const RATE_LIMIT = 120;
+const RATE_WINDOW_MS = 60 * 1000;
+
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const patientId = searchParams.get("patientId");
+    const patientId = validatePatientId(searchParams.get("patientId"));
 
-    if (!patientId) {
-      return NextResponse.json(
-        { success: false, error: "Falta el parámetro requerido: patientId." },
-        { status: 400 }
-      );
-    }
-
-    const supabase = getSupabaseClient();
+    const supabase = getReadClient();
     const { data, error } = await supabase
       .from("risa_alerts")
       .select("*")
@@ -37,6 +36,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ success: true, data: data || [] });
   } catch (error: any) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+    }
     return NextResponse.json(
       { success: false, error: error.message || "Error procesando la solicitud." },
       { status: 500 }
@@ -51,39 +53,26 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const {
-      patientId,
-      variableCode,
-      value,
-      timestamp,
-      kind,
-      priorityTier,
-      priorityScore,
-      ruleReason,
-    }: {
-      patientId: string;
-      variableCode: string;
-      value: number | null;
-      timestamp: string;
-      kind: "VALUE_ANOMALY" | "DATA_GAP";
-      priorityTier: "MEDIUM" | "HIGH" | "CRITICAL";
-      priorityScore: number;
-      ruleReason: string;
-    } = body;
-
-    if (!patientId || !variableCode || !timestamp || !priorityTier || !ruleReason || !kind) {
+    const limit = checkRateLimit(`alerts:${getClientKey(request)}`, RATE_LIMIT, RATE_WINDOW_MS);
+    if (!limit.allowed) {
       return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Faltan campos requeridos. Debes proporcionar: patientId, variableCode, timestamp, kind, priorityTier, ruleReason.",
-        },
-        { status: 400 }
+        { success: false, error: "Demasiadas alertas por minuto. Reintenta en unos segundos." },
+        { status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) } }
       );
     }
 
-    const supabase = getSupabaseClient();
+    const body = await request.json();
+
+    const patientId = validatePatientId(body?.patientId);
+    const variableCode = validateVariableCode(body?.variableCode);
+    const timestamp = validateTimestamp(body?.timestamp);
+    const kind = validateAlertKind(body?.kind);
+    const priorityTier = validatePriorityTier(body?.priorityTier);
+    const priorityScore = validateScore(body?.priorityScore);
+    const value = validateMeasurement(body?.value);
+    const ruleReason = sanitizeFreeText(body?.ruleReason, "ruleReason");
+
+    const supabase = getWriteClient();
 
     const { data: upserted, error: upsertError } = await supabase
       .from("risa_alerts")
@@ -132,6 +121,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, data: alertRow });
   } catch (error: any) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+    }
     return NextResponse.json(
       { success: false, error: error.message || "Error procesando la solicitud." },
       { status: 500 }

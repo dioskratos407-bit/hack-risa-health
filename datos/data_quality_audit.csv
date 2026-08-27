@@ -1,0 +1,15 @@
+etapa,categoria,conteo
+1.1 Observaciones,recuperado_unidad_degF,166
+1.1 Observaciones,recuperado_retransmit_huerfano,1
+1.1 Observaciones,descartado_check_pendiente_revision,4164
+1.1 Observaciones,descartado_low_signal,108
+1.1 Observaciones,descartado_retransmit_duplicado,539
+1.2 Dispositivos,descartado_metadato_o_baja_calidad,13329
+1.3 Wearables,descartado_calidad_sensor,0
+1.3 Wearables,descartado_fuga_temporal,0
+2. Deduplicación,descartado_conflicto_prioridad,147374
+3. Integridad,descartado_valor_faltante_no_parseable,0
+3. Integridad,descartado_fuera_rango_biologico,549
+3. Integridad,descartado_categoria_no_valida,0
+3. Integridad,descartado_variable_no_reconocida,0
+4. Ruido transitorio,descartado_pico_no_persistente,75

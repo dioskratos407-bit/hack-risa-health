@@ -32,6 +32,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# la plantilla sin claves SI se versiona (reproducibilidad)
+!.env.example
 
 # vercel
 .vercel
@@ -43,4 +45,7 @@ next-env.d.ts
 # data & large csv files
 *.csv
 datos/*.csv
+# la auditoria del ETL SI se versiona: solo contiene conteos por etapa (evidencia
+# de limpieza), ningun dato de paciente
+!datos/data_quality_audit.csv
 

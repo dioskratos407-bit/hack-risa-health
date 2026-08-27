@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getReadClient } from "@/lib/supabaseClient";
 import { mockPatientsList } from "@/lib/mockPatients";
 import {
   fetchAlertAggregates,
@@ -8,16 +8,6 @@ import {
   PriorityTier,
 } from "@/lib/activityAggregates";
 
-function getSupabaseClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error(
-      "Supabase credentials are missing from environment variables (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)."
-    );
-  }
-  return createClient(supabaseUrl, supabaseAnonKey);
-}
 
 const VARIABLE_LABELS: Record<string, string> = {
   HR: "Frecuencia Cardíaca",
@@ -40,7 +30,7 @@ function firstSentence(text: string, maxLength = 180): string {
 
 export async function GET() {
   try {
-    const supabase = getSupabaseClient();
+    const supabase = getReadClient();
 
     // "Pacientes evaluados" = el roster real navegable por la app (directorio de
     // /pacientes), no el conteo bruto de risa_master_data -- ese incluye pacientes que

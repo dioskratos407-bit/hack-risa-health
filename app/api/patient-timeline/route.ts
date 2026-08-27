@@ -1,24 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getReadClient } from "@/lib/supabaseClient";
 import { getVariablesForCluster, getAllVariables } from "@/lib/clinicalClusters";
+import {
+  validatePatientId,
+  validateTimestamp,
+  validateCluster,
+  ValidationError,
+} from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const patientId = searchParams.get("patientId");
-    const timeT = searchParams.get("timeT");
-    const cluster = searchParams.get("cluster");
-
-    // Validación de parámetros obligatorios
-    if (!patientId || !timeT || !cluster) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Faltan parámetros requeridos. Debes proporcionar: patientId, timeT y cluster.",
-        },
-        { status: 400 }
-      );
-    }
+    const patientId = validatePatientId(searchParams.get("patientId"));
+    const timeT = validateTimestamp(searchParams.get("timeT"), "timeT");
+    const cluster = validateCluster(searchParams.get("cluster"));
 
     const variablesDelCluster =
       cluster.toUpperCase() === "ALL" ? getAllVariables() : getVariablesForCluster(cluster);
@@ -32,20 +27,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-
-    if (!supabaseUrl || !supabaseAnonKey) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Supabase credentials are missing from environment variables (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY).",
-        },
-        { status: 500 }
-      );
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const supabase = getReadClient();
 
     // Consulta a Supabase con filtro de Viaje en el Tiempo (<= timeT), paginada: sin
     // esto, PostgREST trunca silenciosamente cada respuesta a su límite por defecto
@@ -87,6 +69,9 @@ export async function GET(request: NextRequest) {
       data: allRows,
     });
   } catch (error: any) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+    }
     return NextResponse.json(
       {
         success: false,

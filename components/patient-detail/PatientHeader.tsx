@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, User, Calendar, Users } from 'lucide-react';
+import { ArrowLeft, User, Users } from 'lucide-react';
 import { PatientItem, mockPatientsList } from '@/lib/mockPatients';
 
 export interface PatientHeaderProps {
@@ -36,18 +36,13 @@ export const PatientHeader: React.FC<PatientHeaderProps> = ({ patient }) => {
               </h1>
             </div>
 
-            <div className="flex items-center gap-3 text-xs text-slate-500 font-medium">
-              <span className="flex items-center gap-1.5 text-slate-500">
-                <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                Última atención: {patient.lastEncounter}
-              </span>
-            </div>
+            <span className="text-xs text-slate-500 font-medium">Expediente de monitorización</span>
           </div>
         </div>
 
         {/* Right Side: Quick Patient Switcher Dropdown & Back Link */}
         <div className="flex flex-wrap items-center gap-3 self-start md:self-center">
-          {/* Selector de los 100 Primeros Pacientes */}
+          {/* Selector de pacientes (roster completo) */}
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 shadow-2xs">
             <Users className="w-4 h-4 text-blue-600 shrink-0" />
             <select
@@ -55,7 +50,7 @@ export const PatientHeader: React.FC<PatientHeaderProps> = ({ patient }) => {
               onChange={handlePatientSelect}
               className="bg-transparent text-xs font-semibold text-slate-800 outline-none cursor-pointer pr-2 max-w-[220px] truncate"
             >
-              {mockPatientsList.slice(0, 100).map((p) => (
+              {mockPatientsList.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.id}
                 </option>

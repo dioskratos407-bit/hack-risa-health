@@ -6,6 +6,7 @@ import { mockPatientsList } from '@/lib/mockPatients';
 import { PatientFilters } from '@/components/patients/PatientFilters';
 import { PatientDirectoryTable } from '@/components/patients/PatientDirectoryTable';
 import { useGlobalSimulation } from '@/components/simulation/GlobalSimulationContext';
+import { PatientDemographics } from '@/lib/patientDemographics';
 import {
   PatientState,
   PatientStateInfo,
@@ -35,8 +36,12 @@ function PacientesContent() {
     VALID_STATE_PARAMS.has(estadoParam) ? estadoParam : 'Todos'
   );
   const [sortBy, setSortBy] = useState<string>('estado');
+  const [regionFilter, setRegionFilter] = useState<string>('Todos');
+  const [programFilter, setProgramFilter] = useState<string>('Todos');
+  const [ageGroupFilter, setAgeGroupFilter] = useState<string>('Todos');
 
   const [rawStates, setRawStates] = useState<Record<string, PatientStateRaw>>({});
+  const [demoById, setDemoById] = useState<Record<string, PatientDemographics>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +74,29 @@ function PacientesContent() {
   useEffect(() => {
     fetchStates(false);
   }, [fetchStates]);
+
+  // Metadatos demográficos: son estáticos (una fila fija por paciente), a diferencia
+  // de los estados -- se piden una sola vez, sin el ciclo de auto-refresh.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/patients')
+      .then((res) => res.json())
+      .then((json) => {
+        if (cancelled || !json.success) return;
+        const map: Record<string, PatientDemographics> = {};
+        (json.patients as PatientDemographics[]).forEach((p) => {
+          map[p.patientId] = p;
+        });
+        setDemoById(map);
+      })
+      .catch(() => {
+        // El perfil demográfico es un complemento visual; si falla, el directorio
+        // sigue funcionando con estado/alertas/diagnósticos igual que antes.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Refresca cuando la simulación produce un diagnóstico nuevo, y en segundo plano
   // mientras está corriendo (para reflejar alertas nuevas sin recargar).
@@ -124,7 +152,12 @@ function PacientesContent() {
         const state = stateById[patient.id]?.state ?? 'SIN_ACTIVIDAD';
         const matchesStatus = statusFilter === 'Todos' || state === statusFilter;
 
-        return matchesSearch && matchesStatus;
+        const demo = demoById[patient.id];
+        const matchesRegion = regionFilter === 'Todos' || demo?.regionType === regionFilter;
+        const matchesProgram = programFilter === 'Todos' || demo?.careProgram === programFilter;
+        const matchesAgeGroup = ageGroupFilter === 'Todos' || demo?.ageGroup === ageGroupFilter;
+
+        return matchesSearch && matchesStatus && matchesRegion && matchesProgram && matchesAgeGroup;
       })
       .sort((a, b) => {
         const infoA = stateById[a.id];
@@ -144,7 +177,7 @@ function PacientesContent() {
         }
         return a.id.localeCompare(b.id);
       });
-  }, [searchQuery, statusFilter, sortBy, stateById]);
+  }, [searchQuery, statusFilter, sortBy, stateById, demoById, regionFilter, programFilter, ageGroupFilter]);
 
   const summaryStates: PatientState[] = ['DIAGNOSTICADO', 'ANALIZANDO', 'CON_ALERTAS', 'SIN_ACTIVIDAD'];
 
@@ -222,12 +255,19 @@ function PacientesContent() {
         onStatusFilterChange={setStatusFilter}
         sortBy={sortBy}
         onSortByChange={setSortBy}
+        regionFilter={regionFilter}
+        onRegionFilterChange={setRegionFilter}
+        programFilter={programFilter}
+        onProgramFilterChange={setProgramFilter}
+        ageGroupFilter={ageGroupFilter}
+        onAgeGroupFilterChange={setAgeGroupFilter}
       />
 
       {/* Directory Table */}
       <PatientDirectoryTable
         patients={filteredPatients}
         stateById={stateById}
+        demoById={demoById}
         loading={loading}
       />
     </div>

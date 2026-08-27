@@ -1,0 +1,4 @@
+# Dependencias del pipeline ETL (clean_health_data.py)
+# Versiones con las que se ejecutó y validó el procesamiento completo.
+pandas>=2.2
+numpy>=1.26

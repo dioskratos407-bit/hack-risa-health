@@ -1,19 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { SupabaseClient } from "@supabase/supabase-js";
+import { getWriteClient } from "@/lib/supabaseClient";
 import { evaluatePoint, hasOwnCandidate, detectDataGap, CONTINUOUS_VARS, AnomalyDetection } from "@/lib/anomalyRules";
 import { computeVariableStats, computeContextScore, TimedValue, VariableStats } from "@/lib/contextStats";
 import { CONTEXT_SCORE_THRESHOLD } from "@/lib/contextEngine";
+import { validatePatientBatch, ValidationError } from "@/lib/validation";
+import { checkRateLimit, getClientKey } from "@/lib/rateLimit";
 
-function getSupabaseClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error(
-      "Supabase credentials are missing from environment variables (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)."
-    );
-  }
-  return createClient(supabaseUrl, supabaseAnonKey);
-}
+// Cada tick dispara escrituras por cada paciente del lote: se acota el tamaño del lote
+// y la frecuencia para que el endpoint no sirva de amplificador.
+const MAX_BATCH_SIZE = 16;
+const RATE_LIMIT = 60;
+const RATE_WINDOW_MS = 60 * 1000;
+
 
 // Cuánto avanza el reloj de un paciente por visita del motor global. Con lecturas cada
 // 20-60 min, una franja de 10h simuladas trae varios puntos nuevos por variable en cada
@@ -256,16 +255,18 @@ async function processPatient(
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const patients: PatientCursorInput[] = body.patients || [];
-    if (!Array.isArray(patients) || patients.length === 0) {
+    const limit = checkRateLimit(`tick:${getClientKey(request)}`, RATE_LIMIT, RATE_WINDOW_MS);
+    if (!limit.allowed) {
       return NextResponse.json(
-        { success: false, error: "Falta el campo requerido: patients (array de { id, cursor? })." },
-        { status: 400 }
+        { success: false, error: "Demasiados ticks por minuto. Reintenta en unos segundos." },
+        { status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) } }
       );
     }
 
-    const supabase = getSupabaseClient();
+    const body = await request.json();
+    const patients: PatientCursorInput[] = validatePatientBatch(body?.patients, MAX_BATCH_SIZE);
+
+    const supabase = getWriteClient();
     const results = await Promise.all(
       patients.map((p) => processPatient(supabase, p.id, p.cursor))
     );
@@ -284,6 +285,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, results, aiCandidates });
   } catch (error: any) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+    }
     return NextResponse.json(
       { success: false, error: error.message || "Error procesando la solicitud." },
       { status: 500 }

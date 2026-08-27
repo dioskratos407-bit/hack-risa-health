@@ -58,6 +58,27 @@ GLITCH_MIN_ABS_DEVIATION = {
     "RESP": 6.0,      # rpm
 }
 
+# Muestreo estratificado de filas crudas para el sistema de visualización de calidad
+# (crudo vs. limpio). Es puramente informativo: no participa en ninguna decisión de
+# filtrado, solo captura una fotografía representativa de cada fuente ANTES de
+# cualquier transformación (unidad, dedup, rango, etc.) para poder mostrarla en la app
+# junto con si esa fila específica terminó en el archivo limpio y por qué no, si aplica.
+RAW_SAMPLE_MAX_PER_SOURCE = 4000
+RAW_SAMPLE_RANDOM_STATE = 42
+
+
+def stratified_sample_ids(df: pd.DataFrame, strat_col: str, cap: int, random_state: int) -> set:
+    """IDs de una muestra estratificada por `strat_col`, para que categorías raras no
+    desaparezcan frente a categorías dominantes en un muestreo puramente aleatorio."""
+    if df.empty:
+        return set()
+    n_groups = max(df[strat_col].nunique(dropna=False), 1)
+    per_group_cap = max(1, cap // n_groups)
+    sampled = df.groupby(strat_col, dropna=False, group_keys=False).apply(
+        lambda g: g.sample(n=min(len(g), per_group_cap), random_state=random_state)
+    )
+    return set(sampled["_raw_row_id"])
+
 
 def fahrenheit_to_celsius(series: pd.Series) -> pd.Series:
     return (series - 32.0) * 5.0 / 9.0
@@ -85,6 +106,12 @@ def process_health_data(folder_path: str, output_path: str = "risa_supabase_impo
     no se puede parsear o queda fuera de rango se descarta y se audita, nunca
     se sustituye. Cada descarte queda contabilizado y, para el filtro de
     ruido, además persistido en un CSV de auditoría aparte.
+
+    Adicionalmente exporta una muestra estratificada y reproducible (random_state fijo)
+    de filas crudas de las 3 fuentes, cada una etiquetada con si terminó en el archivo
+    limpio y, si no, por qué -- para el sistema de visualización de calidad. Es un
+    proceso de solo lectura sobre las mismas máscaras que ya calcula el pipeline: no
+    agrega, cambia ni reordena ningún filtro existente.
     """
     print("=" * 70)
     print("  CAPA CLEAN - PIPELINE DE INGESTIÓN Y CALIDAD DE DATOS DE SALUD")
@@ -109,6 +136,13 @@ def process_health_data(folder_path: str, output_path: str = "risa_supabase_impo
 
     audit_rows = []  # (etapa, categoria, conteo) -> se exporta como CSV de auditoría
 
+    # Acumuladores para el sistema de visualización de calidad (crudo vs. limpio):
+    # reason_map asocia _raw_row_id -> motivo de descarte (se llena progresivamente a
+    # medida que se calcula cada máscara existente, sin duplicar ninguna regla), y
+    # raw_sample_frames junta las fotografías de cada fuente al final del proceso.
+    reason_map: dict = {}
+    raw_sample_frames = []
+
     # =========================================================================
     # 1. TRIAJE DE CALIDAD POR FUENTE (con recuperación justificada de datos)
     # =========================================================================
@@ -117,6 +151,20 @@ def process_health_data(folder_path: str, output_path: str = "risa_supabase_impo
     # --- 1.1 Observaciones Generales (Clínico / Monitor Gateway) ---
     df_obs = pd.read_csv(obs_file, encoding="utf-8-sig")
     n_obs_in = len(df_obs)
+    df_obs["_raw_row_id"] = "observations:" + df_obs.index.astype(str)
+
+    # Fotografía de la muestra ANTES de la normalización de unidad de abajo, para que
+    # el valor "crudo" mostrado en la auditoría sea realmente el original (ej. en
+    # Fahrenheit), no el ya convertido a Celsius.
+    obs_sample_ids = stratified_sample_ids(
+        df_obs, "quality_flag", RAW_SAMPLE_MAX_PER_SOURCE, RAW_SAMPLE_RANDOM_STATE
+    )
+    sample_df_obs = df_obs.loc[df_obs["_raw_row_id"].isin(obs_sample_ids), [
+        "_raw_row_id", "patient_id", "device_id", "variable_code", "timestamp", "value",
+        "unit", "quality_flag",
+    ]].copy()
+    sample_df_obs["signal_quality"] = np.nan
+    raw_sample_frames.append(sample_df_obs)
 
     # Normalización de unidad ANTES de cualquier filtro de calidad/rango:
     # algunas lecturas de TEMP llegan en Fahrenheit (marcadas quality_flag=UNIT_VARIANT).
@@ -149,6 +197,17 @@ def process_health_data(folder_path: str, output_path: str = "risa_supabase_impo
     is_orphan_retransmit = pd.Series(False, index=df_obs.index)
     is_orphan_retransmit.loc[df_obs.index[is_retransmit]] = retransmit_lookup["_has_ok"].isna().to_numpy()
 
+    # Motivo de descarte por fila, solo para las filas que cayeron en la muestra --
+    # mismas máscaras que ya calculó el triaje de arriba, no se inventa ninguna regla.
+    for mask, reason in (
+        (is_check, "descartado_check_pendiente_revision"),
+        (is_low_signal, "descartado_low_signal"),
+        (is_retransmit & ~is_orphan_retransmit, "descartado_retransmit_duplicado"),
+    ):
+        ids_in_sample = df_obs.loc[mask, "_raw_row_id"]
+        for rid in ids_in_sample[ids_in_sample.isin(obs_sample_ids)]:
+            reason_map[rid] = reason
+
     keep_mask = is_ok | is_unit_variant | is_orphan_retransmit
     df_obs_clean = df_obs[keep_mask].copy()
     df_obs_clean["source_priority"] = 1
@@ -175,12 +234,36 @@ def process_health_data(folder_path: str, output_path: str = "risa_supabase_impo
     # --- 1.2 Dispositivos (Monitores) ---
     df_dev = pd.read_csv(dev_file, encoding="utf-8-sig")
     n_dev_in = len(df_dev)
+    df_dev["_raw_row_id"] = "device_observations:" + df_dev.index.astype(str)
     df_dev["signal_quality"] = pd.to_numeric(df_dev["signal_quality"], errors="coerce")
+
+    # Sin un "quality_flag" propio como en observaciones: se deriva un bucket
+    # equivalente solo para poder mostrar/estratificar esta fuente igual que las otras.
+    df_dev["_quality_bucket"] = np.where(
+        df_dev["variable_code"] == "SIGNAL_QUALITY_INDEX",
+        "METADATA",
+        np.where(df_dev["signal_quality"] >= 0.70, "OK", "LOW_QUALITY"),
+    )
+    dev_sample_ids = stratified_sample_ids(
+        df_dev, "_quality_bucket", RAW_SAMPLE_MAX_PER_SOURCE, RAW_SAMPLE_RANDOM_STATE
+    )
+    sample_df_dev = df_dev.loc[df_dev["_raw_row_id"].isin(dev_sample_ids), [
+        "_raw_row_id", "patient_id", "device_id", "variable_code", "timestamp", "value",
+        "signal_quality", "_quality_bucket",
+    ]].copy()
+    sample_df_dev = sample_df_dev.rename(columns={"_quality_bucket": "quality_flag"})
+    sample_df_dev["unit"] = None
+    raw_sample_frames.append(sample_df_dev)
+
     df_dev_clean = df_dev[
         (df_dev["variable_code"] != "SIGNAL_QUALITY_INDEX") & (df_dev["signal_quality"] >= 0.70)
     ].copy()
     n_dev_noise = n_dev_in - len(df_dev_clean)
     df_dev_clean["source_priority"] = 2
+
+    dev_dropped_ids = df_dev.loc[~df_dev.index.isin(df_dev_clean.index), "_raw_row_id"]
+    for rid in dev_dropped_ids[dev_dropped_ids.isin(dev_sample_ids)]:
+        reason_map[rid] = "descartado_metadato_o_baja_calidad"
     print(f"Dispositivos (Monitores) -> Entrada: {n_dev_in:,} | Descartados (Metadato/Calidad < 0.70): {n_dev_noise:,} | Conservados: {len(df_dev_clean):,}")
     if len(df_dev_clean) == 0:
         print("  [AUDITORÍA] device_observations.csv no aportó ningún vital en esta carga: el 100% de sus filas")
@@ -190,16 +273,38 @@ def process_health_data(folder_path: str, output_path: str = "risa_supabase_impo
     # --- 1.3 Wearables ---
     df_wear = pd.read_csv(wear_file, encoding="utf-8-sig")
     n_wear_in = len(df_wear)
+    df_wear["_raw_row_id"] = "wearable_observations:" + df_wear.index.astype(str)
+    wear_sample_ids = stratified_sample_ids(
+        df_wear, "measurement_quality", RAW_SAMPLE_MAX_PER_SOURCE, RAW_SAMPLE_RANDOM_STATE
+    )
+    sample_df_wear = df_wear.loc[df_wear["_raw_row_id"].isin(wear_sample_ids), [
+        "_raw_row_id", "patient_id", "device_id", "variable_code", "timestamp", "value",
+        "measurement_quality",
+    ]].copy()
+    sample_df_wear = sample_df_wear.rename(columns={"measurement_quality": "quality_flag"})
+    sample_df_wear["unit"] = None
+    sample_df_wear["signal_quality"] = np.nan
+    raw_sample_frames.append(sample_df_wear)
+
     df_wear_clean = df_wear[df_wear["measurement_quality"] == "OK"].copy()
     n_wear_qual_dropped = n_wear_in - len(df_wear_clean)
+    wear_qual_dropped_ids = df_wear.loc[~df_wear.index.isin(df_wear_clean.index), "_raw_row_id"]
+    for rid in wear_qual_dropped_ids[wear_qual_dropped_ids.isin(wear_sample_ids)]:
+        reason_map[rid] = "descartado_calidad_sensor"
 
     # Filtro anti-fuga temporal: la sincronización no puede ocurrir antes del evento físico.
     df_wear_clean["timestamp_dt"] = pd.to_datetime(df_wear_clean["timestamp"], errors="coerce")
     df_wear_clean["sync_datetime_dt"] = pd.to_datetime(df_wear_clean["sync_datetime"], errors="coerce")
     valid_time = df_wear_clean["sync_datetime_dt"] >= df_wear_clean["timestamp_dt"]
+    wear_pre_time_index = df_wear_clean.index
     df_wear_clean = df_wear_clean[valid_time].copy()
     n_wear_time_dropped = (len(df_wear) - n_wear_qual_dropped) - len(df_wear_clean)
     df_wear_clean["source_priority"] = 3
+    wear_time_dropped_ids = df_wear.loc[
+        wear_pre_time_index.difference(df_wear_clean.index), "_raw_row_id"
+    ]
+    for rid in wear_time_dropped_ids[wear_time_dropped_ids.isin(wear_sample_ids)]:
+        reason_map[rid] = "descartado_fuga_temporal"
     print(f"Wearables -> Entrada: {n_wear_in:,} | Descartados por calidad: {n_wear_qual_dropped:,} | Descartados por Fuga Temporal: {n_wear_time_dropped:,} | Conservados: {len(df_wear_clean):,}")
     audit_rows += [
         ("1.3 Wearables", "descartado_calidad_sensor", n_wear_qual_dropped),
@@ -214,7 +319,7 @@ def process_health_data(folder_path: str, output_path: str = "risa_supabase_impo
     # =========================================================================
     print("\n--- PASO 2: Homologación, Unificación y Deduplicación Jerárquica ---")
 
-    cols_needed = ["patient_id", "device_id", "timestamp", "variable_code", "value", "source_priority"]
+    cols_needed = ["patient_id", "device_id", "timestamp", "variable_code", "value", "source_priority", "_raw_row_id"]
 
     for df in [df_obs_clean, df_dev_clean, df_wear_clean]:
         if not df.empty:
@@ -241,6 +346,11 @@ def process_health_data(folder_path: str, output_path: str = "risa_supabase_impo
     dedup_df = merged_df.drop_duplicates(
         subset=["patient_id", "dedup_timestamp", "variable_code"], keep="first"
     ).copy()
+
+    dedup_dropped_ids = merged_df.loc[merged_df.index.difference(dedup_df.index), "_raw_row_id"]
+    all_sample_ids = obs_sample_ids | dev_sample_ids | wear_sample_ids
+    for rid in dedup_dropped_ids[dedup_dropped_ids.isin(all_sample_ids)]:
+        reason_map[rid] = "descartado_conflicto_prioridad"
 
     n_dedup_dropped = n_merged_before_dedup - len(dedup_df)
     print(f"Registros pre-deduplicación: {n_merged_before_dedup:,}")
@@ -291,6 +401,27 @@ def process_health_data(folder_path: str, output_path: str = "risa_supabase_impo
     )
     df_categorical_clean["value"] = df_categorical_clean["clean_value"]
     n_categorical_dropped = len(df_categorical) - len(df_categorical_clean)
+
+    # Motivo de descarte por fila (Paso 3), solo para las filas que cayeron en la
+    # muestra -- mismas máscaras ya calculadas arriba.
+    other_ids = df_other["_raw_row_id"]
+    for rid in other_ids[other_ids.isin(all_sample_ids)]:
+        reason_map[rid] = "descartado_variable_no_reconocida"
+
+    missing_ids = df_continuous.loc[df_continuous["numeric_value"].isna(), "_raw_row_id"]
+    for rid in missing_ids[missing_ids.isin(all_sample_ids)]:
+        reason_map[rid] = "descartado_valor_faltante_no_parseable"
+
+    out_of_range_ids = df_continuous.loc[
+        ~valid_continuous_mask & df_continuous["numeric_value"].notna(), "_raw_row_id"
+    ]
+    for rid in out_of_range_ids[out_of_range_ids.isin(all_sample_ids)]:
+        reason_map[rid] = "descartado_fuera_rango_biologico"
+
+    categorical_dropped_ids = set(df_categorical["_raw_row_id"]) - set(df_categorical_clean["_raw_row_id"])
+    for rid in categorical_dropped_ids:
+        if rid in all_sample_ids:
+            reason_map[rid] = "descartado_categoria_no_valida"
 
     n_bio_dropped = n_continuous_dropped + n_categorical_dropped + len(df_other)
 
@@ -346,14 +477,26 @@ def process_health_data(folder_path: str, output_path: str = "risa_supabase_impo
         n_glitches = int(is_confirmed_glitch.sum())
         if n_glitches > 0:
             flagged = df_glitch[is_confirmed_glitch][
-                ["patient_id", "device_id", "variable_code", "timestamp", "value"]
+                ["patient_id", "device_id", "variable_code", "timestamp", "value", "_raw_row_id"]
             ].copy()
             flagged["modified_z_score"] = modified_z[is_confirmed_glitch].round(2).to_numpy()
             flagged["motivo"] = "pico_transitorio_no_persistente"
             audit_path = os.path.join(folder_path, "flagged_transient_glitches.csv")
-            flagged.to_csv(audit_path, index=False)
+            flagged.drop(columns=["_raw_row_id"]).to_csv(audit_path, index=False)
             print(f"  Picos transitorios descartados (no persisten en la lectura siguiente): {n_glitches:,}")
             print(f"  Detalle exportado para auditoría clínica: {audit_path}")
+
+            # Los picos confirmados se incluyen COMPLETOS en la muestra cruda (son
+            # pocos y cada uno es un ejemplo valioso), no solo una fracción muestreada.
+            glitch_sample = flagged[
+                ["_raw_row_id", "patient_id", "device_id", "variable_code", "timestamp", "value"]
+            ].copy()
+            glitch_sample["unit"] = None
+            glitch_sample["quality_flag"] = None
+            glitch_sample["signal_quality"] = np.nan
+            raw_sample_frames.append(glitch_sample)
+            for rid in glitch_sample["_raw_row_id"]:
+                reason_map[rid] = "descartado_pico_no_persistente"
         else:
             print("  No se detectaron picos transitorios aislados con este umbral.")
 
@@ -390,6 +533,36 @@ def process_health_data(folder_path: str, output_path: str = "risa_supabase_impo
     export_path = os.path.join(folder_path, output_path) if not os.path.isabs(output_path) else output_path
     final_export_df.to_csv(export_path, index=False)
 
+    # --- Ensamblado de la muestra cruda para el sistema de visualización de calidad ---
+    # was_kept_in_clean se resuelve por pertenencia a final_clean_df (que todavía
+    # conserva _raw_row_id porque cols_needed lo incluye) -- ninguna fila de la muestra
+    # se re-evalúa con una regla nueva, solo se consulta si sobrevivió o no.
+    kept_ids = set(final_clean_df["_raw_row_id"])
+    raw_sample_df = (
+        pd.concat(raw_sample_frames, ignore_index=True)
+        if raw_sample_frames
+        else pd.DataFrame(columns=[
+            "_raw_row_id", "patient_id", "device_id", "variable_code", "timestamp", "value",
+            "unit", "quality_flag", "signal_quality",
+        ])
+    )
+    raw_sample_df = raw_sample_df.drop_duplicates(subset=["_raw_row_id"])
+    raw_sample_df["source_file"] = raw_sample_df["_raw_row_id"].str.split(":", n=1).str[0]
+    raw_sample_df["was_kept_in_clean"] = raw_sample_df["_raw_row_id"].isin(kept_ids)
+    raw_sample_df["rejection_reason"] = raw_sample_df["_raw_row_id"].map(reason_map)
+    raw_sample_df.loc[raw_sample_df["was_kept_in_clean"], "rejection_reason"] = None
+    raw_sample_df["raw_timestamp"] = pd.to_datetime(
+        raw_sample_df["timestamp"], errors="coerce", utc=True
+    ).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    raw_sample_output_cols = [
+        "source_file", "patient_id", "device_id", "variable_code", "raw_timestamp", "value",
+        "unit", "quality_flag", "signal_quality", "was_kept_in_clean", "rejection_reason",
+    ]
+    raw_sample_export = raw_sample_df[raw_sample_output_cols].rename(columns={"value": "raw_value"})
+    raw_sample_path = os.path.join(folder_path, "raw_data_sample.csv")
+    raw_sample_export.to_csv(raw_sample_path, index=False)
+
     audit_df = pd.DataFrame(audit_rows, columns=["etapa", "categoria", "conteo"])
     audit_summary_path = os.path.join(folder_path, "data_quality_audit.csv")
     audit_df.to_csv(audit_summary_path, index=False)
@@ -414,6 +587,7 @@ def process_health_data(folder_path: str, output_path: str = "risa_supabase_impo
     print(f"  [OK] Columnas de salida: {', '.join(output_cols)}")
     print(f"  [OK] Archivo generado: {export_path}")
     print(f"  [OK] Auditoría de descartes: {audit_summary_path}")
+    print(f"  [OK] Muestra cruda para auditoría visual: {raw_sample_path} ({len(raw_sample_export):,} filas)")
     print("=" * 70 + "\n")
 
     return final_export_df

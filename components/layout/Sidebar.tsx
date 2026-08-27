@@ -8,6 +8,8 @@ import {
   LayoutDashboard, 
   FolderHeart, 
   AlertCircle, 
+  ShieldCheck,
+  GitCompare,
   X 
 } from 'lucide-react';
 
@@ -37,6 +39,16 @@ export const navItems: NavItem[] = [
     label: 'Pacientes Priorizados',
     icon: AlertCircle,
     href: '/priorizados',
+  },
+  {
+    label: 'Calidad de Datos',
+    icon: ShieldCheck,
+    href: '/calidad-datos',
+  },
+  {
+    label: 'Correlación de Datos',
+    icon: GitCompare,
+    href: '/correlacion-datos',
   },
 ];
 

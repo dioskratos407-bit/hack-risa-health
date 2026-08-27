@@ -8,6 +8,7 @@ import {
   VariableStats,
 } from '@/lib/contextStats';
 import { generateIncrementalDiagnosis } from '@/lib/gemini';
+import { fetchPatientClinicalContext } from '@/lib/clinicalContext';
 
 /** Mínimo de tiempo SIMULADO entre dos análisis del mismo paciente (x -> x + t). */
 export const ANALYSIS_MIN_INTERVAL_SIM_MS = 6 * 60 * 60 * 1000;
@@ -157,6 +158,14 @@ export async function runContextAnalysis(
     }
   });
 
+  // Contexto clínico ampliado, acotado al mismo intervalo incremental que los signos
+  // vitales (salvo los antecedentes, que son de fondo y no se acotan por intervalo) --
+  // ver lib/clinicalContext.ts. Un fallo aquí no debe tumbar el diagnóstico: la IA
+  // simplemente razona solo con signos vitales, como antes de esta ampliación.
+  const clinicalContext = await fetchPatientClinicalContext(supabase, patientId, windowEndISO, {
+    intervalStartISO,
+  }).catch(() => null);
+
   try {
     const insight = await generateIncrementalDiagnosis({
       patientId,
@@ -167,6 +176,10 @@ export async function runContextAnalysis(
       correlations,
       activityLevel,
       contextScore,
+      activeConditions: clinicalContext?.activeConditions,
+      recentLabs: clinicalContext?.recentLabs,
+      recentMedications: clinicalContext?.recentMedications,
+      connectivityEvents: clinicalContext?.recentConnectivityEvents,
     });
 
     const baseRow = {

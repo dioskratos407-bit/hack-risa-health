@@ -7,6 +7,7 @@ import { AlertGrid } from '@/components/prioritized/AlertGrid';
 import { PrioritizedPatient } from '@/lib/mockPrioritized';
 import { formatRelativeTime } from '@/lib/formatRelativeTime';
 import { useGlobalSimulation } from '@/components/simulation/GlobalSimulationContext';
+import { CrossDataCorrelations } from '@/components/prioritized/CrossDataCorrelations';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 
 interface RawPrioritized {
@@ -140,6 +141,9 @@ function PriorizadosContent() {
       ) : (
         <AlertGrid patients={filteredPatients} />
       )}
+
+      {/* Cross-table clinical & operational correlations */}
+      <CrossDataCorrelations />
     </div>
   );
 }

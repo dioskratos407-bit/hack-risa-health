@@ -1,17 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getReadClient } from "@/lib/supabaseClient";
 import { fetchAlertAggregates, fetchInsightAggregates } from "@/lib/activityAggregates";
 
-function getSupabaseClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error(
-      "Supabase credentials are missing from environment variables (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)."
-    );
-  }
-  return createClient(supabaseUrl, supabaseAnonKey);
-}
 
 export interface PatientStateRow {
   patientId: string;
@@ -28,7 +18,7 @@ export interface PatientStateRow {
  */
 export async function GET() {
   try {
-    const supabase = getSupabaseClient();
+    const supabase = getReadClient();
 
     const [{ byPatient: alertsByPatient }, insightsByPatient] = await Promise.all([
       fetchAlertAggregates(supabase),

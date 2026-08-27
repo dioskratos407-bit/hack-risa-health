@@ -53,7 +53,7 @@ export interface InsightAggregate {
  * filas por defecto, así que sin esto los conteos se congelan al crecer el volumen --
  * el mismo problema que ya apareció antes en /api/patient-timeline.
  */
-async function fetchAllRows<T>(
+export async function fetchAllRows<T>(
   supabase: SupabaseClient,
   table: string,
   columns: string,

@@ -10,11 +10,17 @@ import {
   PATIENT_STATE_LABELS,
   PATIENT_STATE_STYLES,
 } from '@/lib/patientStates';
+import {
+  PatientDemographics,
+  REGION_TYPE_LABELS,
+  CARE_PROGRAM_LABELS,
+} from '@/lib/patientDemographics';
 import { ChevronRight, User, BrainCircuit, Minus } from 'lucide-react';
 
 export interface PatientDirectoryTableProps {
   patients: PatientItem[];
   stateById: Record<string, PatientStateInfo>;
+  demoById?: Record<string, PatientDemographics>;
   loading?: boolean;
   onSelectPatient?: (patient: PatientItem) => void;
 }
@@ -48,6 +54,7 @@ const StateBadge: React.FC<{ state: PatientState }> = ({ state }) => {
 export const PatientDirectoryTable: React.FC<PatientDirectoryTableProps> = ({
   patients,
   stateById,
+  demoById = {},
   loading,
   onSelectPatient,
 }) => {
@@ -63,11 +70,14 @@ export const PatientDirectoryTable: React.FC<PatientDirectoryTableProps> = ({
 
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-xs">
-      <table className="w-full text-left border-collapse min-w-[700px]">
+      <table className="w-full text-left border-collapse min-w-[860px]">
         <thead>
           <tr className="bg-slate-50 text-slate-500 uppercase text-xs font-semibold tracking-wider border-b border-slate-200">
             <th scope="col" className="py-3.5 px-4 md:px-6">
               Paciente
+            </th>
+            <th scope="col" className="py-3.5 px-4 md:px-6">
+              Perfil
             </th>
             <th scope="col" className="py-3.5 px-4 md:px-6">
               Diagnósticos IA
@@ -84,20 +94,21 @@ export const PatientDirectoryTable: React.FC<PatientDirectoryTableProps> = ({
           {loading ? (
             Array.from({ length: 5 }).map((_, i) => (
               <tr key={i}>
-                <td className="py-4 px-4 md:px-6" colSpan={4}>
+                <td className="py-4 px-4 md:px-6" colSpan={5}>
                   <div className="h-5 w-full rounded-md bg-slate-100 animate-pulse" />
                 </td>
               </tr>
             ))
           ) : patients.length === 0 ? (
             <tr>
-              <td colSpan={4} className="py-12 text-center text-slate-400 font-medium">
+              <td colSpan={5} className="py-12 text-center text-slate-400 font-medium">
                 No se encontraron pacientes que coincidan con la búsqueda.
               </td>
             </tr>
           ) : (
             patients.map((patient) => {
               const info = stateById[patient.id];
+              const demo = demoById[patient.id];
               const state: PatientState = info?.state ?? 'SIN_ACTIVIDAD';
               const hasDiagnosis = (info?.insightCount ?? 0) > 0;
 
@@ -117,6 +128,26 @@ export const PatientDirectoryTable: React.FC<PatientDirectoryTableProps> = ({
                         {patient.id}
                       </span>
                     </div>
+                  </td>
+
+                  {/* Perfil demográfico */}
+                  <td className="py-4 px-4 md:px-6">
+                    {demo ? (
+                      <div className="leading-tight">
+                        <span className="block text-slate-700 text-xs font-semibold">
+                          {demo.ageYears} años · {demo.sexAtBirth}
+                        </span>
+                        <span className="block text-[11px] text-slate-400">
+                          {REGION_TYPE_LABELS[demo.regionType] ?? demo.regionType} ·{' '}
+                          {CARE_PROGRAM_LABELS[demo.careProgram] ?? demo.careProgram}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-xs text-slate-400">
+                        <Minus className="w-3.5 h-3.5" />
+                        Sin datos
+                      </span>
+                    )}
                   </td>
 
                   {/* Diagnósticos IA */}

@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getWriteClient } from "@/lib/supabaseClient";
 import { runContextAnalysis } from "@/lib/contextEngine";
+import { validatePatientId, validateTimestamp, ValidationError } from "@/lib/validation";
+import { checkRateLimit, getClientKey } from "@/lib/rateLimit";
 
-function getSupabaseClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error(
-      "Supabase credentials are missing from environment variables (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)."
-    );
-  }
-  return createClient(supabaseUrl, supabaseAnonKey);
-}
+// Este endpoint puede terminar en una llamada facturada al LLM, así que es el que más
+// conviene acotar: un bucle accidental en el cliente agotaría la cuota.
+const RATE_LIMIT = 30;
+const RATE_WINDOW_MS = 60 * 1000;
+
 
 /**
  * Dispara el análisis contextual incremental de un paciente anclado a un momento
@@ -20,17 +17,19 @@ function getSupabaseClient() {
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { patientId, timeT }: { patientId?: string; timeT?: string } = body;
-
-    if (!patientId || !timeT) {
+    const limit = checkRateLimit(`analyze:${getClientKey(request)}`, RATE_LIMIT, RATE_WINDOW_MS);
+    if (!limit.allowed) {
       return NextResponse.json(
-        { success: false, error: "Faltan campos requeridos: patientId, timeT." },
-        { status: 400 }
+        { success: false, error: "Demasiadas solicitudes de análisis. Reintenta en unos segundos." },
+        { status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) } }
       );
     }
 
-    const supabase = getSupabaseClient();
+    const body = await request.json();
+    const patientId = validatePatientId(body?.patientId);
+    const timeT = validateTimestamp(body?.timeT, "timeT");
+
+    const supabase = getWriteClient();
     const outcome = await runContextAnalysis(supabase, patientId, timeT);
 
     return NextResponse.json({
@@ -40,6 +39,9 @@ export async function POST(request: NextRequest) {
       contextScore: outcome.contextScore ?? null,
     });
   } catch (error: any) {
+    if (error instanceof ValidationError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+    }
     return NextResponse.json(
       { success: false, error: error.message || "Error procesando la solicitud." },
       { status: 500 }
